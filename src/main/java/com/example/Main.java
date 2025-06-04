@@ -1,6 +1,7 @@
 package com.example;
 
 import com.example.runner.DecryptionRunner;
+import com.example.runner.EncryptionRunner;
 
 public class Main {
     static {
@@ -19,7 +20,10 @@ public class Main {
                                                                                                    // decrypted image
         String decryptedImagePath = "src\\main\\java\\com\\example\\output\\decrypted_output.jpg"; // Path to save the
                                                                                                    // decrypted image
-        DecryptionRunner.run(cascadeFilePath, encryptedImagePath, decryptedImagePath);
+        // EncryptionRunner.run(cascadeFilePath, imagePath, outputImagePath);
+
+        DecryptionRunner.run(cascadeFilePath, encryptedImagePath,
+                decryptedImagePath);
 
     }
 }

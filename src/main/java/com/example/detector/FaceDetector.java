@@ -36,9 +36,9 @@ public class FaceDetector {
             Imgproc.rectangle(image, rect, new Scalar(0, 255, 0), 2);
         }
 
-        String outputImagePath = "src\\main\\java\\com\\example\\output\\output.jpg";
-        Imgcodecs.imwrite(outputImagePath, image);
-        System.out.println("Output image saved to " + outputImagePath);
+        // String outputImagePath = "src\\main\\java\\com\\example\\output\\output.jpg";
+        // Imgcodecs.imwrite(outputImagePath, image);
+        // System.out.println("Output image saved to " + outputImagePath);
 
         return faceRects;
     }
