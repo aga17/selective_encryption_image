@@ -6,6 +6,13 @@
     "configurations": [
         {
             "type": "java",
+            "name": "AESTest",
+            "request": "launch",
+            "mainClass": "com.example.test.AESTest",
+            "projectName": "selectiveimageencryption"
+        },
+        {
+            "type": "java",
             "name": "Current File",
             "request": "launch",
             "mainClass": "${file}"

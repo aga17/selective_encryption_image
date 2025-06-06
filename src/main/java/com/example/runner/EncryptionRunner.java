@@ -1,20 +1,21 @@
 package com.example.runner;
 
 import java.io.FileWriter;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import javax.crypto.SecretKey;
 
+import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.Rect;
-import org.opencv.core.Scalar;
 import org.opencv.imgcodecs.Imgcodecs;
-import org.opencv.imgproc.Imgproc;
-
 import com.example.detector.FaceDetector;
 import com.example.util.AESUtil;
 
@@ -23,94 +24,92 @@ public class EncryptionRunner {
         System.load("C:\\opencv\\build\\java\\x64\\opencv_java4110.dll");
     }
 
-    public static void run(String cascadefilePath, String inputImagepath, String outputImagePath) throws Exception {
-        // Detect faces
-        FaceDetector detector = new FaceDetector(cascadefilePath);
-        List<Rect> faces = detector.detectFaces(inputImagepath);
+    public static void run(String cascadeFilePath, String inputImagePath, String outputImagePath) throws Exception {
+        FaceDetector detector = new FaceDetector(cascadeFilePath);
+        List<Rect> faces = detector.detectFaces(inputImagePath);
+        System.out.println("[Encryption] Faces detected: " + faces.size());
 
-        System.out.println("[Encryption] Detected faces: " + faces.size());
+        Mat image = Imgcodecs.imread(inputImagePath);
 
-        Mat image = Imgcodecs.imread(inputImagepath);
-        System.out.println("[Encryption] Image info - Rows: " + image.rows() +
-                ", Cols: " + image.cols() + ", Type: " + image.type() +
-                ", Channels: " + image.channels());
+        if (image.empty()) {
+            throw new RuntimeException("Could not load image: " + inputImagePath);
+        }
 
-        // Generate AES key and IV
+        System.out.println("Original image type: " + image.type() + " (should be " + CvType.CV_8UC3 + ")");
+        System.out.println("Original image channels: " + image.channels());
+
         SecretKey aesKey = AESUtil.generateKey();
-        byte[] iv = AESUtil.generateIV();
+        String base64Key = Base64.getEncoder().encodeToString(aesKey.getEncoded());
+        Files.writeString(Paths.get("src/main/resources/temp/key.txt"), base64Key);
 
-        // Save key and IV
-        Files.writeString(Paths.get("key.txt"), Base64.getEncoder().encodeToString(aesKey.getEncoded()));
-        Files.writeString(Paths.get("iv.txt"), Base64.getEncoder().encodeToString(iv));
+        // Store region metadata
+        List<Map<String, Object>> metadataList = new ArrayList<>();
 
-        // Save face coordinates for decryption
-        saveFaceCoordinates(faces);
+        for (Rect rect : faces) {
+            System.out.println("[Encryption] Processing face at: " + rect.x + "," + rect.y +
+                    " size: " + rect.width + "x" + rect.height);
 
-        // Create a copy to show before/after comparison
-        Mat originalImage = image.clone();
-
-        for (int i = 0; i < faces.size(); i++) {
-            Rect r = faces.get(i);
-            System.out.println("[Encryption] Processing face " + (i + 1) + ": " +
-                    "x=" + r.x + ", y=" + r.y + ", w=" + r.width + ", h=" + r.height);
-
-            Mat faceRegion = new Mat(image, r);
-
-            // Debug: Save original face region
-            Imgcodecs.imwrite("debug_face_" + i + "_original.jpg", faceRegion);
-
+            Mat faceRegion = image.submat(rect);
             int numBytes = (int) (faceRegion.total() * faceRegion.channels());
-            byte[] facePixels = new byte[numBytes];
-            faceRegion.get(0, 0, facePixels);
+            byte[] faceBytes = new byte[numBytes];
+            faceRegion.get(0, 0, faceBytes);
 
-            System.out.println("[Encryption] Face " + (i + 1) + " pixel data length: " + facePixels.length);
+            System.out.println("[Encryption] Original bytes length: " + faceBytes.length);
 
-            // Print first few pixel values for debugging
-            System.out.print("[Encryption] Original pixels (first 10): ");
-            for (int j = 0; j < Math.min(10, facePixels.length); j++) {
-                System.out.print((facePixels[j] & 0xFF) + " ");
+            // Create checksum for validation
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] originalHash = md.digest(faceBytes);
+
+            byte[] iv = AESUtil.generateIV();
+            byte[] encrypted = AESUtil.encryptBytes(faceBytes, aesKey, iv);
+
+            System.out.println("[Encryption] Encrypted bytes length: " + encrypted.length);
+
+            if (encrypted.length != faceBytes.length) {
+                System.err.println("[Encryption] Length mismatch! Original: " + faceBytes.length +
+                        ", Encrypted: " + encrypted.length);
+                continue;
             }
-            System.out.println();
 
-            byte[] encrypted = AESUtil.encryptBytes(facePixels, aesKey, iv);
+            // Verify encryption worked by testing decryption
+            try {
+                byte[] testDecrypt = AESUtil.decryptBytes(encrypted, aesKey, iv);
+                byte[] testHash = md.digest(testDecrypt);
 
-            if (encrypted.length == facePixels.length) {
-                faceRegion.put(0, 0, encrypted);
-
-                // Debug: Save encrypted face region
-                Imgcodecs.imwrite("debug_face_" + i + "_encrypted.jpg", faceRegion);
-
-                System.out.println("[Encryption] Face " + (i + 1) + " encrypted successfully");
-
-                // Print first few encrypted values for debugging
-                System.out.print("[Encryption] Encrypted pixels (first 10): ");
-                for (int j = 0; j < Math.min(10, encrypted.length); j++) {
-                    System.out.print((encrypted[j] & 0xFF) + " ");
+                if (!MessageDigest.isEqual(originalHash, testHash)) {
+                    System.err.println("[Encryption] Validation failed for face at " + rect);
+                    continue;
                 }
-                System.out.println();
-            } else {
-                System.out.println("[Encryption] Face " + (i + 1) + " - Length mismatch! Original: " +
-                        facePixels.length + ", Encrypted: " + encrypted.length);
+                System.out.println("[Encryption] Validation passed for face at " + rect);
+            } catch (Exception e) {
+                System.err.println("[Encryption] Test decryption failed: " + e.getMessage());
+                continue;
             }
+
+            faceRegion.put(0, 0, encrypted);
+
+            Map<String, Object> regionData = new HashMap<>();
+            regionData.put("x", rect.x);
+            regionData.put("y", rect.y);
+            regionData.put("width", rect.width);
+            regionData.put("height", rect.height);
+            regionData.put("iv", Base64.getEncoder().encodeToString(iv));
+            regionData.put("originalHash", Base64.getEncoder().encodeToString(originalHash));
+
+            metadataList.add(regionData);
         }
 
-        // Save the encrypted image
-        Imgcodecs.imwrite(outputImagePath, image);
+        boolean success = Imgcodecs.imwrite(outputImagePath, image);
+        if (!success) {
+            throw new RuntimeException("Failed to write encrypted image");
+        }
+
+        // Save metadata to JSON file
+        FileWriter writer = new FileWriter("src/main/resources/temp/metadata.json");
+        writer.write(new com.google.gson.Gson().toJson(metadataList));
+        writer.close();
+
         System.out.println("[Encryption] Encrypted image saved to: " + outputImagePath);
-
-        // Save comparison image showing original faces with rectangles
-        for (Rect r : faces) {
-            Imgproc.rectangle(originalImage, r, new Scalar(0, 255, 0), 2);
-        }
-        Imgcodecs.imwrite("debug_original_with_rectangles.jpg", originalImage);
-    }
-
-    private static void saveFaceCoordinates(List<Rect> faces) throws IOException {
-        try (FileWriter writer = new FileWriter("face_coordinates.txt")) {
-            for (Rect face : faces) {
-                writer.write(face.x + "," + face.y + "," + face.width + "," + face.height + "\n");
-            }
-        }
-        System.out.println("[Encryption] Face coordinates saved to face_coordinates.txt");
+        System.out.println("[Encryption] Successfully encrypted " + metadataList.size() + " face regions");
     }
 }
